@@ -28,9 +28,39 @@ router = APIRouter(
 # It's been pulled out — see PROBLEM_STATEMENT.md. `TagCreate` schema and the
 # `Category` model are still imported/available above for you to use.
 
+@router.post('/tag', status_code=status.HTTP_201_CREATED)
+def create_tag(
+    tag: TagCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(oauth2.get_current_admin)
+):
+    existing_tag = db.query(Category).filter(
+        Category.slug == tag.slug
+    ).first()
+
+    if existing_tag:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tag with this slug already exists"
+        )
+
+    new_tag = Category(
+        name=tag.name,
+        slug=tag.slug
+    )
+
+    db.add(new_tag)
+    db.commit()
+    db.refresh(new_tag)
+
+    return {
+        "name": new_tag.name,
+        "slug": new_tag.slug
+    }
+
 @router.get('/', status_code=status.HTTP_200_OK, response_model=List[ProblemResponse])
 def get_problems(page: int = Query(default=1, ge=1), limit: int = Query(default=20, ge=5, le=100), db: Session = Depends(get_db), current_user: User | None = Depends(oauth2.get_optional_current_admin)):
-    offset = page * limit
+    offset = (page - 1) * limit
     if current_user:
         problems = db.query(Problem).order_by(Problem.id.asc()).offset(offset).limit(limit).all()
     else:
@@ -65,7 +95,7 @@ def get_problem_by_id(problem_id: str, db: Session = Depends(get_db), current_us
         "accepted_submissions": problem.accepted_submissions,
 
         "description": problem.description,
-        "constraints": problem.constraints,
+        "constraints": list(problem.constraints.values()),
         "input_desc": problem.input_desc,
         "output_desc": problem.output_desc,
         "sample_io": problem.sample_io,
